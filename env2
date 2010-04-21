@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-
 # Script path
 spath=$(cd "${0%/*}" 2>/dev/null; echo "$PWD"/"${0##*/}")
 
