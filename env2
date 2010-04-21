@@ -409,10 +409,9 @@ env_delete() {
 env_switch() {
 	local name="${1##*/}"
 	[ -z "$name" ] && usage
-
 	env_init
 	env_ask_sync
-	git branch | grep "^  $name$" && env_link_config "unlink"
+	git branch | grep "^  $name$" > /dev/null && env_link_config "unlink"
 	cd $ENVDIR
 	git checkout "$name" || error "environment '$name' not found"
 	env_link_config
@@ -429,7 +428,7 @@ env_rename() {
 env_add() {
 	relative_name "$1" "$BASEDIR"
 	cd $BASEDIR
-	cp --parents $REL_NAME $ENVDIR/
+	cp --parents -a $REL_NAME $ENVDIR/
 	cd $ENVDIR
 	git add $REL_NAME
 	env_sync
