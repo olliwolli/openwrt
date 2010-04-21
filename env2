@@ -10,7 +10,7 @@ ENVNAME="env2"
 ENVDIR="$BASEDIR/$ENVNAME"
 
 UNWANTED=".unwanted"
-
+SVNINFO=".svninfo"
 #DEBUG=true
 #DISABLE_SVN=true
 
@@ -69,6 +69,32 @@ svn_parse_info (){
 	cd $BASEDIR
 }
 
+svn_parse_info_own (){
+	cd "$1"
+	if [ -e $SVNINFO ]; then
+		URL=`cat $SVNINFO |  grep 'URL: ' | cut -d ' ' -f2`
+		REVISION=`cat $SVNINFO | grep 'Revision: ' | cut -d ' ' -f2`
+	fi
+	cd $BASEDIR
+}
+
+svn_save_info_own (){
+	cd $BASEDIR
+	DIR=$1
+	local ENTRY="$DIR/.svn/entries"
+	if [ ! -e "$ENTRY" ];then
+		echo "Not a SVN repository can not save info"
+		return
+	fi
+	cd $DIR
+	echo "cd $DIR .. $SVNINFO"
+	LANG=C svn info 2> /dev/null > $SVNINFO
+	cd $BASEDIR
+	cp --parents $DIR/$SVNINFO $ENVDIR
+	rm $DIR/$SVNINFO
+	decho "Saved SVN info for $DIR"
+}
+
 svn_save_info (){
 	cd $BASEDIR
 	local DIR=$1
@@ -89,7 +115,7 @@ svn_restore_checkout (){
 	svn_parse_info "$BASEDIR/$DIR"
 	local CUR_REV=$REVISION
 	local CUR_URL=$URL
-	svn_parse_info "$ENVDIR/$DIR"
+	svn_parse_info_own "$ENVDIR/$DIR"
 	local SAVED_REV=$REVISION
 	local SAVED_URL=$URL
 
@@ -161,9 +187,9 @@ svn_save (){
 	feeds=`grep -v '^#' $FEEDF | cut -d' ' -f2`
 	
 	for FEED in ${feeds[@]}; do
-		svn_save_info "feeds/$FEED"
+		svn_save_info_own "feeds/$FEED"
 	done
-	svn_save_info "."
+	svn_save_info_own "."
 }
 
 svn_info (){
