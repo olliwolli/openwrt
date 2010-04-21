@@ -13,7 +13,7 @@ Index: scripts/env2
 ===================================================================
 --- scripts/env2	(Revision 0)
 +++ scripts/env2	(Revision 0)
-@@ -0,0 +1,493 @@
+@@ -0,0 +1,519 @@
 +#!/usr/bin/env bash
 +# Script path
 +spath=$(cd "${0%/*}" 2>/dev/null; echo "$PWD"/"${0##*/}")
@@ -26,7 +26,7 @@ Index: scripts/env2
 +ENVDIR="$BASEDIR/$ENVNAME"
 +
 +UNWANTED=".unwanted"
-+
++SVNINFO=".svninfo"
 +#DEBUG=true
 +#DISABLE_SVN=true
 +
@@ -85,6 +85,32 @@ Index: scripts/env2
 +	cd $BASEDIR
 +}
 +
++svn_parse_info_own (){
++	cd "$1"
++	if [ -e $SVNINFO ]; then
++		URL=`cat $SVNINFO |  grep 'URL: ' | cut -d ' ' -f2`
++		REVISION=`cat $SVNINFO | grep 'Revision: ' | cut -d ' ' -f2`
++	fi
++	cd $BASEDIR
++}
++
++svn_save_info_own (){
++	cd $BASEDIR
++	DIR=$1
++	local ENTRY="$DIR/.svn/entries"
++	if [ ! -e "$ENTRY" ];then
++		echo "Not a SVN repository can not save info"
++		return
++	fi
++	cd $DIR
++	echo "cd $DIR .. $SVNINFO"
++	LANG=C svn info 2> /dev/null > $SVNINFO
++	cd $BASEDIR
++	cp --parents $DIR/$SVNINFO $ENVDIR
++	rm $DIR/$SVNINFO
++	decho "Saved SVN info for $DIR"
++}
++
 +svn_save_info (){
 +	cd $BASEDIR
 +	local DIR=$1
@@ -105,7 +131,7 @@ Index: scripts/env2
 +	svn_parse_info "$BASEDIR/$DIR"
 +	local CUR_REV=$REVISION
 +	local CUR_URL=$URL
-+	svn_parse_info "$ENVDIR/$DIR"
++	svn_parse_info_own "$ENVDIR/$DIR"
 +	local SAVED_REV=$REVISION
 +	local SAVED_URL=$URL
 +
@@ -177,9 +203,9 @@ Index: scripts/env2
 +	feeds=`grep -v '^#' $FEEDF | cut -d' ' -f2`
 +	
 +	for FEED in ${feeds[@]}; do
-+		svn_save_info "feeds/$FEED"
++		svn_save_info_own "feeds/$FEED"
 +	done
-+	svn_save_info "."
++	svn_save_info_own "."
 +}
 +
 +svn_info (){
@@ -399,10 +425,9 @@ Index: scripts/env2
 +env_switch() {
 +	local name="${1##*/}"
 +	[ -z "$name" ] && usage
-+
 +	env_init
 +	env_ask_sync
-+	git branch | grep "^  $name$" && env_link_config "unlink"
++	git branch | grep "^  $name$" > /dev/null && env_link_config "unlink"
 +	cd $ENVDIR
 +	git checkout "$name" || error "environment '$name' not found"
 +	env_link_config
@@ -419,7 +444,7 @@ Index: scripts/env2
 +env_add() {
 +	relative_name "$1" "$BASEDIR"
 +	cd $BASEDIR
-+	cp --parents $REL_NAME $ENVDIR/
++	cp --parents -a $REL_NAME $ENVDIR/
 +	cd $ENVDIR
 +	git add $REL_NAME
 +	env_sync
@@ -427,11 +452,12 @@ Index: scripts/env2
 +}
 +
 +env_remove() {
-+	relative_name "$1"
++	relative_name "$1" "$BASEDIR"
++	echo "Removing $REL_NAME"
 +	cd $BASEDIR
-+	rm $REL_NAME
++	[ -e "$REL_NAME" ] && rm "$REL_NAME"
 +	cd $ENVDIR
-+	rm $REL_NAME
++	[ -e "$REL_NAME" ] && rm "$REL_NAME"
 +	env_sync
 +}
 +
