@@ -1,0 +1,542 @@
+Index: .gitignore
+===================================================================
+--- .gitignore	(Revision 21056)
++++ .gitignore	(Arbeitskopie)
+@@ -1,5 +1,6 @@
+ .*.swp
+ /env
++/amb
+ /dl
+ /.config
+ /.config.old
+Index: scripts/amb
+===================================================================
+--- scripts/amb	(Revision 0)
++++ scripts/amb	(Revision 0)
+@@ -0,0 +1,520 @@
++#!/usr/bin/env bash
++# Script path
++spath=$(cd "${0%/*}" 2>/dev/null; echo "$PWD"/"${0##*/}")
++
++# OpenWrt checkout, assuming it is one level down from the
++# script directory in which this script should be.
++BASEDIR=`readlink -f $(dirname $spath)/..`
++
++ENVNAME="amb"
++ENVDIR="$BASEDIR/$ENVNAME"
++
++UNWANTED=".unwanted"
++SVNINFO=".svninfo"
++
++#DEBUG=true
++#DISABLE_SVN=true
++
++usage() {
++	cat <<EOF
++Usage: $0 [options] <command> [arguments]
++Commands:
++	help                This help text
++	list                List environments
++	clear               Delete all environment and revert to flat config/files
++	new <name>          Create a new environment
++	switch <name>       Switch to a different environment
++	delete <name>       Delete an environment
++	rename <newname>    Rename the current environment
++	diff <opt>          Show differences between current state and environment
++	save                Save your changes to the environment
++	revert              Revert your changes since last save
++	add <file>          Add a file to be tracked in the current environment
++	remove <file>       Remove a file from the current environment
++	disable             Substitutes symlinks to $ENVNAME with copies of the current branch
++	unwanted <file>     Adds <file> to the list of unwanted files
++	info                Information about the current branch
++	gdiff <1> <2> <opt> Diff between two branches (takes git diff options like --summary)
++	unwanted <file>     Mark a file to be deleted from the OpenWrt environment
++	rewanted <file>     Mark a file not to be delete from OpenWrt environment (only after unwanted)
++	listunwanted        List unwanted files for current environment
++Options:
++EOF
++	exit ${1:-1}
++}
++op (){
++	[ "$DEBUG" = "true" ] && echo "Executing: $1" 
++	[ "$2" = "1" ] && $1 
++}
++
++decho (){
++	[ "$DEBUG" = "true" ] && echo "$1"
++}
++
++relative_name() {
++	if [ ! -d $1 ]; then
++		cd `dirname $1`
++		REL_NAME=`pwd`/`basename $1`
++	else
++		cd "$1"
++		REL_NAME=`pwd`
++	fi
++	REL_NAME=${REL_NAME#$2/}
++	cd $BASEDIR
++}
++
++svn_parse_info (){
++	cd "$1"
++	URL=`svn info | grep 'URL: ' | cut -d ' ' -f2`
++	REVISION=`svn info | grep 'Revision: ' | cut -d ' ' -f2`
++	cd $BASEDIR
++}
++
++svn_parse_info_own (){
++	cd "$1"
++	if [ -e $SVNINFO ]; then
++		URL=`cat $SVNINFO |  grep 'URL: ' | cut -d ' ' -f2`
++		REVISION=`cat $SVNINFO | grep 'Revision: ' | cut -d ' ' -f2`
++	fi
++	cd $BASEDIR
++}
++
++svn_save_info_own (){
++	cd $BASEDIR
++	DIR=$1
++	local ENTRY="$DIR/.svn/entries"
++	if [ ! -e "$ENTRY" ];then
++		echo "Not a SVN repository can not save info"
++		return
++	fi
++	cd $DIR
++	echo "cd $DIR .. $SVNINFO"
++	LANG=C svn info 2> /dev/null > $SVNINFO
++	cd $BASEDIR
++	cp --parents $DIR/$SVNINFO $ENVDIR
++	rm $DIR/$SVNINFO
++	decho "Saved SVN info for $DIR"
++}
++
++svn_save_info (){
++	cd $BASEDIR
++	local DIR=$1
++	local ENTRY="$DIR/.svn/entries"
++	if [ ! -e "$ENTRY" ];then
++		echo "Not a SVN repository can not save info"
++		return
++	fi
++	
++	# default is 0444
++	[ -e $ENVDIR/$ENTRY ] && chmod 0644 "$ENVDIR/$ENTRY"
++	add_file "$ENTRY"
++	decho "Saved SVN info for $DIR"
++}
++
++svn_restore_checkout (){
++	local DIR=$1
++	svn_parse_info "$BASEDIR/$DIR"
++	local CUR_REV=$REVISION
++	local CUR_URL=$URL
++	svn_parse_info_own "$ENVDIR/$DIR"
++	local SAVED_REV=$REVISION
++	local SAVED_URL=$URL
++
++	
++	if [ "$CUR_URL" != "$SAVED_URL" ];then
++		echo "SVN: Current $CUR_URL -> saved: $SAVED_URL"
++		op "svn switch $SAVED_URL" 1
++	else
++		decho "URL for $DIR was already $SAVED_URL, not switching"
++	fi
++
++	if [ -e $DIR ]; then
++		cd $DIR
++		DO_SVN_UPDATE=n
++		if [ "$CUR_REV" = "$SAVED_REV" ]; then
++			if ask_bool 0 "SVN revisions of $DIR do not differ, update anyway? (Might be needed to restore deleted files)"; then
++				DO_SVN_UPDATE=y
++			fi
++		else 
++			DO_SVN_UPDATE=y
++		fi
++
++		if [ "$DO_SVN_UPDATE" = "y" ]; then
++				echo "SVN: Current $CUR_REV -> saved: $SAVED_REV"
++				op "svn update  -r $SAVED_REV" 1
++				cd $BASEDIR
++				SVN_UPDATED=y
++		else 
++			decho "SVN checkout $DIR was already on revision $SAVED_REV, not updating."
++		fi
++	fi
++}
++
++
++svn_restore (){
++	[ "$DISABLE_SVN" = "true" ] && return 
++	cd $ENVDIR
++	local FEEDF="$ENVDIR/feeds.conf"
++	if [ ! -e "feeds.conf" ]; then
++		rm -f "$BASEDIR/feeds.conf"
++		FEEDF="$FEEDF.default" 
++	fi
++	if [ -e $FEEDF ]; then	
++		feeds=`grep -v '^#' $FEEDF | cut -d' ' -f2`
++
++		for FEED in ${feeds[@]}; do
++			svn_restore_checkout "feeds/$FEED"
++		done
++	else
++		rm -f "$BASEDIR/feeds.conf.default"
++	fi
++	svn_restore_checkout "."
++	if [ "$SVN_UPDATED" = "y" ] &&  ask_bool 0 "Run feeds update -i and make symlinks" ; then
++		cd $BASEDIR
++		op "$BASEDIR/scripts/feeds update -i" 1
++		op "make package/symlinks" 1
++	fi
++	apply_unwanted
++}
++
++
++svn_save (){
++	cd $BASEDIR
++	[ "$DISABLE_SVN" = "true" ] && return
++	FEEDF="$BASEDIR/feeds.conf"
++	[ ! -e "$FEEDF" ] && FEEDF="$FEEDF.default"
++	[ ! -e "$FEEDF" ] && svn update $FEEDF		
++	add_file "$FEEDF"
++	feeds=`grep -v '^#' $FEEDF | cut -d' ' -f2`
++	
++	for FEED in ${feeds[@]}; do
++		svn_save_info_own "feeds/$FEED"
++	done
++	svn_save_info_own "."
++}
++
++svn_info (){
++	cd $BASEDIR
++	local FEEDF="$BASEDIR/feeds.conf"
++	[ ! -e "$FEEDF" ] && FEEDF="$FEEDF.default"
++	feeds=`grep -v '^#' $FEEDF | cut -d' ' -f2`
++	for FEED in ${feeds[@]}; do
++		svn_parse_info "feeds/$FEED"
++		echo -e "[$FEED] $URL:$REVISION"
++	done
++	svn_parse_info "."
++	echo "[Core] $URL:$REVISION"
++}
++
++add_file() {
++	cd $BASEDIR
++	relative_name "$1" "$BASEDIR"
++	LNAME=$REL_NAME
++	cd $BASEDIR
++	if [ -L $LNAME ]; then
++		decho "File already linked to env2"
++	else
++		cp --parents -a $LNAME $ENVNAME
++		echo "Added file: $LNAME"
++	fi
++}
++
++error() {
++	echo "$0: $*"
++	exit 1
++}
++
++ask_bool() {
++	local DEFAULT="$1"; shift
++	local def defstr val
++	case "$DEFAULT" in
++		1) def=0; defstr="Y/n";;
++		0) def=1; defstr="y/N";;
++		*) def=;  defstr="y/n";;
++	esac
++	while [ -z "$val" ]; do
++		local VAL
++
++		echo -n "$* ($defstr): "
++		read VAL
++		case "$VAL" in
++			y*|Y*) val=0;;
++			n*|N*) val=1;;
++			*) val="$def";;
++		esac
++	done
++	return "$val"
++}
++
++add_unwanted (){
++	local LNAME=`readlink -f $1`
++	relative_name "$LNAME" "$BASEDIR"
++	LNAME=$REL_NAME
++	cd $BASEDIR
++	touch $ENVDIR/$UNWANTED
++	echo "$LNAME" > $ENVDIR/$UNWANTED
++	sort -u $ENVDIR/$UNWANTED | grep -v "^$" > $ENVDIR/$UNWANTED.tmp
++	mv $ENVDIR/$UNWANTED.tmp $ENVDIR/$UNWANTED
++	apply_unwanted
++	cd $ENVDIR
++	git add .unwanted
++}
++
++remove_unwanted (){
++	local LNAME=`readlink -f $1`
++	relative_name "$LNAME" "$BASEDIR"
++	LNAME=$REL_NAME
++	cd $BASEDIR
++
++	if [ -e $ENVDIR/$UNWANTED ]; then
++		sort -u $ENVDIR/$UNWANTED | grep -v "^$" | grep -v "$LNAME" > $ENVDIR/$UNWANTED.tmp
++		mv $ENVDIR/$UNWANTED.tmp $ENVDIR/$UNWANTED
++	else
++		echo "$ENVDIR/$UNWANTED does not exist"
++	fi
++}
++
++list_unwanted (){
++	if [ -e $ENVDIR/$UNWANTED ]; then
++		cat $ENVDIR/$UNWANTED
++	else
++		echo "No files unwanted"
++	fi
++}
++
++apply_unwanted (){
++	if [ -e $ENVDIR/$UNWANTED ]; then	
++		cat "$ENVDIR/$UNWANTED" | while read ITEM; do
++			echo "Deleting $ITEM"
++			[ -e "$BASEDIR/$ITEM" ] && rm "$BASEDIR/$ITEM"
++		done
++	fi
++}
++
++env_init() {
++	local CREATE="$1"
++	if [ -z "$CREATE" ]; then
++		[ -d "$ENVDIR" ] || exit 0
++	fi
++	[ -x "$(which git 2>/dev/null)" ] || error "Git is not installed"
++	mkdir -p "$ENVDIR" || error "Failed to create the environment directory"
++	cd "$ENVDIR" || error "Failed to switch to the environment directory"
++	[ -d .git ] || { 
++		git init &&
++		cd "$BASEDIR" &&
++		add_file README &&
++		cd "$ENVDIR"
++		git add . && 
++		git commit -q -m "Initial import"
++	} || {
++		rm -rf .git
++		error "Failed to initialize the environment directory"
++	}
++}
++
++env_sync_data() {
++	git add .
++	git add -u
++}
++
++env_sync() {
++	local STR="$1"
++	env_sync_data
++	git commit -m "${STR:-Update} at $(date)"
++}
++
++env_link_config() {
++	cd $ENVDIR
++	local files=`find $ENVDIR -type f | grep -v '.git' | grep -v '.svn' | grep -v ".unwanted"`
++	for GFILE in ${files[@]}; do
++		cd $ENVDIR
++		relative_name $GFILE $ENVDIR
++		LNAME=$REL_NAME
++		cd $BASEDIR
++		op "rm -f $LNAME" 1
++		case $1 in
++			unlink) [ "$LNAME" = ".config" ] && { cp $ENVDIR/$LNAME $LNAME
++					echo "Keeping the .config of the previous environment"
++				}
++				;;
++			copy)   mkdir -p `dirname $LNAME`
++				op "cp $ENVDIR/$LNAME $LNAME" 1;;
++			*) 	mkdir -p `dirname $LNAME`
++				op "ln -s $ENVDIR/$LNAME $LNAME" 1;;
++		esac
++	done
++	[ "$1" = "unlink" ] && rm -rf $BASEDIR/files && mkdir $BASEDIR/files
++}
++
++env_do_reset() {
++	git reset --hard HEAD
++	git clean -d -f
++}
++
++env_list() {
++	env_init
++	git branch | grep -vE '^. master$'
++}
++
++env_diff() {
++	cd $BASEDIR
++	env_init
++	env_sync_data
++	git diff --cached $1
++	#env_link_config
++}
++
++env_save() {
++	env_init
++	env_sync
++	env_link_config
++	svn_save
++}
++
++env_revert() {
++	env_init
++	env_do_reset
++	env_link_config
++}
++
++env_ask_sync() {
++	env_sync_data
++	LINES="$(env_diff | wc -l)" # implies env_init
++	[ "$LINES" -gt 0 ] && {
++		if ask_bool 1 "Do you want to save your changes"; then
++			env_sync
++		else
++			env_do_reset
++		fi
++	}
++}
++
++env_clear() {
++	if ask_bool 1 "Do you want to keep your current config and files"; then
++		echo "Keeping config"
++	else
++		rm -rf "$ENVDIR"
++	fi
++	cd "$BASEDIR"
++}
++
++env_delete() {
++	local name="${1##*/}"
++	env_init
++	[ -z "$name" ] && usage
++	branch="$(git branch | grep '^\* ' | awk '{print $2}')"
++	[ "$name" = "$branch" ] && error "cannot delete the currently selected environment"
++	git branch -D "$name"
++}
++
++env_switch() {
++	local name="${1##*/}"
++	[ -z "$name" ] && usage
++	env_init
++	env_ask_sync
++	git branch | grep "^  $name$" > /dev/null && env_link_config "unlink"
++	cd $ENVDIR
++	git checkout "$name" || error "environment '$name' not found"
++	env_link_config
++	svn_restore
++}
++
++env_rename() {
++	local NAME="${1##*/}"
++	env_init
++	git branch -m "$NAME"
++}
++
++
++env_add() {
++	relative_name "$1" "$BASEDIR"
++	cd $BASEDIR
++	cp --parents -a $REL_NAME $ENVDIR/
++	cd $ENVDIR
++	git add $REL_NAME
++	env_sync
++	env_link_config
++}
++
++env_remove() {
++	relative_name "$1" "$BASEDIR"
++	echo "Removing $REL_NAME"
++	cd $BASEDIR
++	[ -e "$REL_NAME" ] && rm "$REL_NAME"
++	cd $ENVDIR
++	[ -e "$REL_NAME" ] && rm "$REL_NAME"
++	env_sync
++}
++
++env_disable() {
++	env_init
++	env_ask_sync
++	env_link_config "copy"
++	svn_restore
++}
++
++env_info() {
++	cd $ENVDIR
++	local BRANCH=$(git branch | grep '^\* ' | awk '{print $2}')
++	cd $BASEDIR
++	echo "GIT Branch: $BRANCH"
++	svn_info 
++}
++
++env_gdiff() {
++	cd $ENVDIR
++	git diff $3 $1 $2
++}
++
++env_new() {
++	local NAME="$1"
++	local branch
++	local from="master"
++
++	[ -z "$NAME" ] && usage
++	env_init 1
++	
++	branch="$(git branch | grep '^\* ' | awk '{print $2}')"
++	if [ -n "$branch" -a "$branch" != "master" ]; then
++		env_ask_sync
++		if ask_bool 0 "Do you want to clone the current environment?"; then
++			from="$branch"
++		else
++			env_link_config "unlink"		
++		fi
++	fi
++	cd $ENVDIR
++	git checkout -b "$1" "$from"
++	if [ "$from" = "master" ]; then
++		cd $BASEDIR
++		svn_save 
++		svn_restore
++		add_file .config 
++		add_file files 
++	fi
++	env_link_config
++	env_save
++}
++
++COMMAND="$1"; shift
++case "$COMMAND" in
++	help) usage 0;;
++	new) env_new "$@";;
++	list) env_list "$@";;
++	clear) env_clear "$@";;
++	switch) env_switch "$@";;
++	delete) env_delete "$@";;
++	rename) env_rename "$@";;
++	diff) env_diff "$@";;
++	add) env_add "$@";;
++	remove) env_remove "$@";;
++	save) env_save "$@";;
++	revert) env_revert "$@";;
++	disable) env_disable "$@";;
++	info) env_info "$@";;
++	gdiff) env_gdiff "$@";;
++	unwanted) add_unwanted "$@";;
++	rewanted) remove_unwanted "$@";;
++	listunwanted) list_unwanted "$@";;
++	*) usage;;
++esac
+
+Eigenschaftsänderungen: scripts/amb
+___________________________________________________________________
+Hinzugefügt: svn:special
+   + *
+
