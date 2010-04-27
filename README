@@ -1,0 +1,5 @@
+Some OpenWrt patches
+
+* amb: script to manage openwrt configurations consistently
+* amb.patch: amb patch for OpenWrt
+* libowfat.patch: libowfat packaged for OpenWrt
