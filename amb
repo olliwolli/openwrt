@@ -407,9 +407,20 @@ env_delete() {
 	git branch -D "$name"
 }
 
+env_switch_select() {
+	cd $ENVDIR
+	local branch="$(git branch | grep '^\* ' | awk '{print $2}')"
+	PS3="Select the branch you want to switch to (current: $branch):"
+	select opt in `git branch | grep -v '\*'`; do
+		select_name=$opt
+		break
+	done
+}
+
 env_switch() {
 	local name="${1##*/}"
-	[ -z "$name" ] && usage
+	[ -z "$name" ] && env_switch_select
+	name=$select_name
 	env_init
 	env_ask_sync
 	git branch | grep "^  $name$" > /dev/null && env_link_config "unlink"
