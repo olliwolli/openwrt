@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Script path
 spath=$(cd "${0%/*}" 2>/dev/null; echo "$PWD"/"${0##*/}")
 
@@ -325,7 +325,7 @@ env_sync() {
 
 env_link_config() {
 	cd $ENVDIR
-	local files=`find $ENVDIR -type f | grep -v '.git' | grep -v '.svn' | grep -v ".unwanted"`
+	local files=`find $ENVDIR -type f | grep -v '.git' | grep -v '.svn' | grep -v ".unwanted" | grep -v "$ENVDIR/files"`
 	for GFILE in ${files[@]}; do
 		cd $ENVDIR
 		relative_name $GFILE $ENVDIR
@@ -343,6 +343,7 @@ env_link_config() {
 				op "ln -s $ENVDIR/$LNAME $LNAME" 1;;
 		esac
 	done
+	rm -rf $BASEDIR/files && ln -s $ENVDIR/files $BASEDIR/files
 	[ "$1" = "unlink" ] && rm -rf $BASEDIR/files && mkdir $BASEDIR/files
 }
 
