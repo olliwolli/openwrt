@@ -1,7 +1,7 @@
 Index: .gitignore
 ===================================================================
---- .gitignore	(Revision 21056)
-+++ .gitignore	(Arbeitskopie)
+--- .gitignore	(revision 21056)
++++ .gitignore	(working copy)
 @@ -1,5 +1,6 @@
  .*.swp
  /env
@@ -11,10 +11,10 @@ Index: .gitignore
  /.config.old
 Index: scripts/amb
 ===================================================================
---- scripts/amb	(Revision 0)
-+++ scripts/amb	(Revision 0)
-@@ -0,0 +1,531 @@
-+#!/usr/bin/env bash
+--- scripts/amb	(revision 0)
++++ scripts/amb	(revision 0)
+@@ -0,0 +1,532 @@
++#!/bin/bash
 +# Script path
 +spath=$(cd "${0%/*}" 2>/dev/null; echo "$PWD"/"${0##*/}")
 +
@@ -341,7 +341,7 @@ Index: scripts/amb
 +
 +env_link_config() {
 +	cd $ENVDIR
-+	local files=`find $ENVDIR -type f | grep -v '.git' | grep -v '.svn' | grep -v ".unwanted"`
++	local files=`find $ENVDIR -type f | grep -v '.git' | grep -v '.svn' | grep -v ".unwanted" | grep -v "$ENVDIR/files"`
 +	for GFILE in ${files[@]}; do
 +		cd $ENVDIR
 +		relative_name $GFILE $ENVDIR
@@ -359,6 +359,7 @@ Index: scripts/amb
 +				op "ln -s $ENVDIR/$LNAME $LNAME" 1;;
 +		esac
 +	done
++	rm -rf $BASEDIR/files && ln -s $ENVDIR/files $BASEDIR/files
 +	[ "$1" = "unlink" ] && rm -rf $BASEDIR/files && mkdir $BASEDIR/files
 +}
 +
@@ -546,8 +547,8 @@ Index: scripts/amb
 +	*) usage;;
 +esac
 
-Eigenschaftsänderungen: scripts/amb
+Property changes on: scripts/amb
 ___________________________________________________________________
-Hinzugefügt: svn:special
+Added: svn:special
    + *
 
