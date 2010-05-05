@@ -320,6 +320,14 @@ env_sync_data() {
 env_sync() {
 	local STR="$1"
 	env_sync_data
+		
+	local gitdiff=`git diff --cached $1`
+	if [ "$gitdiff" != "" ]; then
+		if ask_bool 0 "Do you want to add a custom commit message?"; then
+			git commit
+			return
+		fi
+	fi
 	git commit -m "${STR:-Update} at $(date)"
 }
 
@@ -361,7 +369,9 @@ env_diff() {
 	cd $BASEDIR
 	env_init
 	env_sync_data
-	git diff --cached $1
+	local gitdiff=`git diff --cached $1`
+	[ "$gitdiff" = "" ] && exit 0
+	exit 1
 	#env_link_config
 }
 

@@ -13,7 +13,7 @@ Index: scripts/amb
 ===================================================================
 --- scripts/amb	(revision 0)
 +++ scripts/amb	(revision 0)
-@@ -0,0 +1,532 @@
+@@ -0,0 +1,542 @@
 +#!/bin/bash
 +# Script path
 +spath=$(cd "${0%/*}" 2>/dev/null; echo "$PWD"/"${0##*/}")
@@ -336,6 +336,14 @@ Index: scripts/amb
 +env_sync() {
 +	local STR="$1"
 +	env_sync_data
++		
++	local gitdiff=`git diff --cached $1`
++	if [ "$gitdiff" != "" ]; then
++		if ask_bool 0 "Do you want to add a custom commit message?"; then
++			git commit
++			return
++		fi
++	fi
 +	git commit -m "${STR:-Update} at $(date)"
 +}
 +
@@ -377,7 +385,9 @@ Index: scripts/amb
 +	cd $BASEDIR
 +	env_init
 +	env_sync_data
-+	git diff --cached $1
++	local gitdiff=`git diff --cached $1`
++	[ "$gitdiff" = "" ] && exit 0
++	exit 1
 +	#env_link_config
 +}
 +
